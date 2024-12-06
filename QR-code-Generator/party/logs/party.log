@@ -1,0 +1,6 @@
+2024-12-05T09:33:07.331+02:00  INFO 29964 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : Starting PartyInvitesApplicationTests using Java 17.0.8 with PID 29964 (started by F5543231 in C:\Users\f5543231\IdeaProjects\party)
+2024-12-05T09:33:07.334+02:00  INFO 29964 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : No active profile set, falling back to 1 default profile: "default"
+2024-12-05T09:33:09.220+02:00  INFO 29964 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : Started PartyInvitesApplicationTests in 2.961 seconds (process running for 5.374)
+2024-12-05T09:33:27.118+02:00  INFO 24556 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : Starting PartyInvitesApplicationTests using Java 17.0.8 with PID 24556 (started by F5543231 in C:\Users\f5543231\IdeaProjects\party)
+2024-12-05T09:33:27.120+02:00  INFO 24556 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : No active profile set, falling back to 1 default profile: "default"
+2024-12-05T09:33:29.502+02:00  INFO 24556 --- [main] c.q.c.g.p.PartyInvitesApplicationTests   : Started PartyInvitesApplicationTests in 2.74 seconds (process running for 4.072)
