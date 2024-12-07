@@ -1,0 +1,19 @@
+meta {
+  name: Update status
+  type: http
+  seq: 4
+}
+
+put {
+  url: http://localhost:9090/api/invite/5543231
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    
+    "status": false
+    
+  }
+}

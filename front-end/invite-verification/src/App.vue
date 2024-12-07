@@ -1,255 +1,261 @@
-<script setup lang="ts">
+<script setup>
 import Nav from '../src/components/Nav.vue';
 import { ref, computed, onMounted } from 'vue';
-import StaffMemeberDataService from '../src/services/StaffMemeberDataService.js';
+import StaffMemeberDataService from './services/StaffMemeberDataService';
+import Swal from 'sweetalert2';
 
-const result =ref('')
-const error = ref('')
-const searchTerm = ref("");
+const result = ref('');
+const paused = ref(false);
+const showScanConfirmation = ref(false);
+const isSubmittingSearch = ref(false);
+const isSubmittingRefresh = ref(false);
 
-const onSearch = () => {
-  markAsUsed(searchTerm.value.trim());
+const error = ref('');
+const searchTerm = ref('');
+const data = ref([]); // Reactive array for staff members
+const filteredResults = ref([]); // Reactive array for filtered results
+
+// Fetch data from the backend
+const resetFields = () => {
+  searchTerm.value = ''; // Clear search field
+  paused.value = false;
+  isSubmittingSearch.value = false;
+  filteredResults.value = data.value; // Reset filtered results to all data
+  fetchData(); // Refresh the data list
 };
 
-// Event Handlers
-const onDetect = (detectedResult) => {
-  markAsUsed(detectedResult);
-};
-
-  function onError(err) {
-    error.value = `[${err.name}]: `
-
-    if (err.name === 'NotAllowedError') {
-      error.value += 'you need to grant camera access permission'
-    } else if (err.name === 'NotFoundError') {
-      error.value += 'no camera on this device'
-    } else if (err.name === 'NotSupportedError') {
-      error.value += 'secure context required (HTTPS, localhost)'
-    } else if (err.name === 'NotReadableError') {
-      error.value += 'is the camera already in use?'
-    } else if (err.name === 'OverconstrainedError') {
-      error.value += 'installed cameras are not suitable'
-    } else if (err.name === 'StreamApiNotSupportedError') {
-      error.value += 'Stream API is not supported in this browser'
-    } else if (err.name === 'InsecureContextError') {
-      error.value += 'Camera access is only permitted in secure context. Use HTTPS or localhost rather than HTTP.'
-    } else {
-      error.value += err.message
-    }
-  }
-
-  onMounted(()=>{
-    data.value = StaffMemeberDataService.getAll();
-  })
-
-  const data = ref([]); // Empty array to hold data fetched from the backend
-
-  // Fetch data from the backend on mount
 const fetchData = async () => {
   try {
-    const response = await StaffMemeberDataService.getAll(); // Replace with your API call
-    data.value = response.data; // Update the list with the backend data
+    const response = await StaffMemeberDataService.getAll();
+    data.value = response.data; // Update staff data
+    filteredResults.value = response.data; // Display all data initially
+    console.log("Fetched staff members:", response.data);
   } catch (err) {
-    console.error("Error fetching data:", err);
-    error.value = "Failed to load data from the server.";
+    console.error("Error fetching staff members:", err);
+    error.value = `Error fetching staff members: ${err.message}`;
+    showAlert(`Failed to refresh the list. Please try again. ${err.message}`, 'error');
+  } finally {
+    isSubmittingRefresh.value = false;
   }
 };
 
-// Computed property for filtered data
-const filteredData = computed(() =>
-  data.value.filter((item) =>
-    item.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-    item.fnumber.toLowerCase().includes(searchTerm.value.toLowerCase())
-  )
-);
-
-// Validate fnumber
-const validateCode = (input: string) => {
-  if (input.trim().toUpperCase().startsWith("ID")) {
-    result.value = `Do not include 'ID' in the code. Enter the rest of the code (e.g., '12345' instead of 'ID12345').`;
-    return false;
-  }
-  return true;
+// SweetAlert helpers
+const showAlert = (title, text, icon) => {
+  Swal.fire({
+    title,
+    text,
+    icon,
+    timer: 5000,
+    showConfirmButton: false,
+    toast: true,
+    position: 'top-right',
+  });
 };
 
-// create validation ganstlocal list before querying the server
-// Helper function to mark code as used
-const markAsUsed = async (fnumber: string) => {
-
-  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
-
-  if (item) {
-    try {
-      // Call backend to update the status
-      const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
-      console.log(response)
-      if (response.status === 200) {
-        // Successfully updated, now refresh the list
-        fetchData();
-        result.value = `${fnumber} matched and marked as used!`;
-      } else {
-        result.value = `Failed to update the status for ${fnumber}.`;
-      }
-    } catch (err) {
-      console.error("Error updating status:", err);
-      result.value = `Error updating the status for ${fnumber}.`;
+// Confirmation dialog
+const showConfirmationDialog = (title, text, callback) => {
+  Swal.fire({
+    title,
+    text,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'Yes',
+    cancelButtonText: 'No',
+  }).then((result) => {
+    if (result.isConfirmed) {
+      callback(); // Execute the provided callback if confirmed
     }
-  } else {
-    result.value = `${fnumber} not found or already used.`;
+  });
+};
+
+// Mark a staff member as used
+const markAsUsed = async (fnumber) => {
+  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
+  const itemExists = data.value.find((row) => row.fnumber === fnumber);
+  console.log(itemExists);
+
+  if (!itemExists) {
+    // Not found in the list
+    showAlert('Not Found', `The F-Number ${fnumber} was not found in the list.`, 'error');
+    resetFields();
+    return;
+  }
+
+  if (itemExists.status) {
+    // Already confirmed
+    showAlert('Already Confirmed', `The F-Number ${fnumber} has already been confirmed.`, 'warn');
+    resetFields();
+    return;
+  }
+
+  try {
+    const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
+    if (response.status === 200) {
+      // Successfully marked as used
+      showAlert('Confirmed', `The F-Number ${fnumber} has been successfully confirmed!`, 'success');
+      result.value = `${fnumber} matched and marked as used!`;
+      resetFields();
+    } else {
+      result.value = `Failed to update the status for ${fnumber}.`;
+      showAlert('Error', `Failed to update the status for ${fnumber}.`, 'error');
+      resetFields();
+    }
+  } catch (err) {
+    console.error("Error updating status:", err);
+    result.value = `Error updating the status for ${fnumber}.`;
+    showAlert('Error', `An error occurred while updating the status for ${fnumber}.`, 'error');
+    resetFields();
   }
 };
 
-// Call fetchData on mount
+// Handle manual search with confirmation
+const onSearch = () => {
+  const trimmedSearchTerm = searchTerm.value.trim();
+
+  if (!trimmedSearchTerm) {
+    showAlert('Empty Search', `Search term is empty. Please enter an F-number`, 'warning');
+    return;
+  }
+
+  console.log("Search triggered for:", searchTerm.value);
+  isSubmittingSearch.value = true;
+
+  try {
+    filteredResults.value = data.value.filter((item) =>
+      item.name.toLowerCase().includes(trimmedSearchTerm.toLowerCase()) ||
+      item.fnumber.toLowerCase().includes(trimmedSearchTerm.toLowerCase())
+    );
+
+    console.log("Filtered results:", filteredResults.value);
+
+    // Ask for confirmation before marking the item as used
+    showConfirmationDialog(
+      'Confirm Search',
+      `Do you want to confirm the F-Number ${trimmedSearchTerm}?`,
+      () => markAsUsed(trimmedSearchTerm)
+    );
+  } finally {
+    isSubmittingSearch.value = false;
+  }
+};
+
+// Handle detection from the QR scanner
+const onDetect = (detectedCodes) => {
+  const detectedValues = detectedCodes.map((code) => code.rawValue);
+  const detectedString = detectedValues.join(','); // Combine multiple codes if needed
+
+  console.log("Detected:", detectedString);
+
+  searchTerm.value = detectedString; // Update the search term field for visibility
+
+  // Directly filter the results based on the detected string
+  filteredResults.value = data.value.filter((item) =>
+    item.name.toLowerCase().includes(detectedString.toLowerCase()) ||
+    item.fnumber.toLowerCase().includes(detectedString.toLowerCase())
+  );
+
+  paused.value = true; // Pause scanning
+
+  // Ask for confirmation before marking the item as used
+  showConfirmationDialog(
+    'Confirm Detection',
+    `Do you want to confirm the F-Number ${detectedString}?`,
+    () => markAsUsed(detectedString)
+  );
+};
+
+// Fetch data when the component is mounted
 onMounted(() => {
   fetchData();
 });
-  
-  // Sample Table Data
-// const data = ref([
-//   { name: "Mwamba Changala", details: "Sample Detail 1", code: "5543231", used:false },
-//   { name: "Mweeemba Hambulo", details: "Sample Detail 2", code: "5095808", used:false },
-//   { name: "John Doe", details: "Sample Detail 3", code: "CODE789", used:false },
-// ]);
-
-// // Computed Property for Filtered Data
-// const filteredData = computed(() =>
-
-//   data.value.filter((item) =>
-
-//     item.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-//     item.code.toLowerCase().includes(searchTerm.value.toLowerCase())
-
-//   )
-
-
-// );
-
-// const validateCode = (input) => {
-//   // Check if input starts with 'ID'
-//   if (input.trim().toUpperCase().startsWith("ID")) {
-//     result.value = `Do not include 'ID' in the code. Enter the rest of the code (e.g., '12345' instead of 'ID12345').`;
-//     return false;
-//   }
-// }
-// // Helper Function to Mark Code as Used
-// const markAsUsed = (code) => {
-//   const item = data.value.find((row) => row.code === code && !row.used);
-//        console.log(item)
-//   if (item) {
-//     item.used = true; // Mark the row as used
-//     result.value = `${code} matched and marked as used!`;
-//   } else {
-//     result.value = `${code} not found or already used.`;
-//   }
-
-  
-// };
-
 </script>
 
 <template>
- 
-    <div class="app-container bg-light">
-        <Nav />
+  <Nav />
+  <div class="app-container bg-light p-4">
+    <div class="container">
+      <p class="text-danger">{{ error }}</p>
 
-        <div class="container pt-4 pb-4">
-            <p style="color: red">{{ error }}</p>
+      <div class="row g-4">
+        <!-- QR Code Scanner -->
+        <div class="col-md-6">
+          <p>Last result: <b>{{ result }}</b></p>
+          <div class="border border-dark rounded d-flex align-items-center justify-content-center" style="height: 300px;">
+            <qrcode-stream
+              :paused="paused"
+              @camera-on="() => (showScanConfirmation = false)"
+              @camera-off="() => (showScanConfirmation = true)"
+              @detect="onDetect"
+              @error="onError"
+            ></qrcode-stream>
+          </div>
+        </div>
 
-            <div class="d-flex justify-content-between align-items-start">
-      <!-- QR Code Scanner -->
-      <div class="scanner-container">
-        <p>Last result: <b>{{ result }}</b></p>
-        <div class="scanner-box">
-          <qrcode-stream
-            :track="paintBoundingBox"
-            @detect="onDetect"
-            @error="onError"
-          ></qrcode-stream>
+        <!-- Search Section -->
+        <div class="col-md-6">
+          <label for="search" class="form-label">Search:</label>
+          <input
+            id="search"
+            type="text"
+            v-model="searchTerm"
+            placeholder="F Number..."
+            class="form-control mb-3"
+          />
+
+          <div class="d-flex gap-2">
+            <!-- Search Button -->
+            <button
+              type="button"
+              class="btn btn-primary d-flex align-items-center"
+              :disabled="isSubmittingSearch"
+              @click="onSearch"
+            >
+              <span v-if="isSubmittingSearch" class="spinner-border spinner-border-sm me-2"></span>
+              <span v-else>Search</span>
+            </button>
+
+            <!-- Refresh Button -->
+            <button
+              type="button"
+              class="btn btn-secondary d-flex align-items-center"
+              :disabled="isSubmittingRefresh"
+              @click="fetchData"
+            >
+              <span v-if="isSubmittingRefresh" class="spinner-border spinner-border-sm me-2"></span>
+              <span v-else>Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Search Input -->
-      <div class="search-container">
-        <label for="search">Search:</label>
-        <input
-          id="search"
-          type="text"
-          v-model="searchTerm"
-          placeholder="F Number..."
-          @input="onSearch"
-          class="form-control"
-        />
+      <!-- Table Section -->
+      <div class="table-responsive mt-4">
+        <table class="table table-bordered table-striped">
+          <thead class="table-primary">
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>F-Number</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(item, index) in filteredResults"
+              :key="index"
+              :class="{ 'text-decoration-line-through bg-light': item.status }"
+            >
+              <td>{{ index + 1 }}</td>
+              <td>{{ item.name }}</td>
+              <td>{{ item.fnumber }}</td>
+              <td>
+                <span v-if="item.status" class="text-muted">Verified</span>
+                <span v-else>Not Verified</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
-
-    <!-- Table Below -->
-    <div class="table-container mt-4">
-      <table class="table table-bordered">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Name</th>
-            <th>F-Number</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(item, index) in filteredData" :key="index" :class="{ 'table-used': item.used }">
-            <td>{{ index + 1 }}</td>
-            <td>{{ item.name }}</td>
-            <td>{{ item.fnumber }}</td>
-            <td>
-              <span v-if="item.status " class="text-muted">Verified</span>
-              <span v-else>Not Verified</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  
-            
-        </div>
-    </div>
- 
+  </div>
 </template>
-
-
-<style>
-@import '@/assets/base.css';
-
-
-.scanner-container {
-  width: 50%;
-}
-
-.scanner-container {
-  width: 50%;
-}
-
-.scanner-box {
-  border: 2px solid black;
-  width: 100%;
-  height: 300px; /* Adjust scanner box height */
-}
-
-.search-container {
-  width: 45%;
-}
-
-.form-control {
-  margin-top: 8px;
-}
-
-.table-container {
-  width: 100%;
-}
-
-.table-used {
-  text-decoration: line-through;
-  background-color: #f8f9fa;
-}
-
-.text-muted {
-  color: gray;
-}
-</style>ba

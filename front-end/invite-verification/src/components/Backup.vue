@@ -1,72 +1,75 @@
 <script setup lang="ts">
 import Nav from '../src/components/Nav.vue';
 import { ref, computed, onMounted } from 'vue';
-import StaffMemeberDataService from '../src/services/StaffMemeberDataService.js';
-import type { Header, Item } from "vue3-easy-data-table";
+import StaffMemeberDataService from './services/StaffMemeberDataService';
 
-const result =ref('')
-const error = ref('')
-const searchTerm = ref("");
-const loading = ref(true);
+// Types
+interface StaffMember {
+  name: string;
+  fnumber: string;
+  status: boolean;
+}
+
+const result = ref<string>('');
+const paused = ref(false);
+const showScanConfirmation = ref(false);
+
+const error = ref<string>('');
+const searchTerm = ref<string>('');
+const data = ref<StaffMember[]>([]);
+
+// Methods
+const onCameraOn = () => {
+  showScanConfirmation.value = false;
+};
+
+const onCameraOff = () => {
+  showScanConfirmation.value = true;
+};
 
 const onSearch = () => {
+  console.log(searchTerm.value.trim())
   markAsUsed(searchTerm.value.trim());
 };
 
-// Event Handlers
-const onDetect = (detectedResult) => {
-  markAsUsed(detectedResult);
-};
-
-  function onError(err) {
-    error.value = `[${err.name}]: `
-
-    if (err.name === 'NotAllowedError') {
-      error.value += 'you need to grant camera access permission'
-    } else if (err.name === 'NotFoundError') {
-      error.value += 'no camera on this device'
-    } else if (err.name === 'NotSupportedError') {
-      error.value += 'secure context required (HTTPS, localhost)'
-    } else if (err.name === 'NotReadableError') {
-      error.value += 'is the camera already in use?'
-    } else if (err.name === 'OverconstrainedError') {
-      error.value += 'installed cameras are not suitable'
-    } else if (err.name === 'StreamApiNotSupportedError') {
-      error.value += 'Stream API is not supported in this browser'
-    } else if (err.name === 'InsecureContextError') {
-      error.value += 'Camera access is only permitted in secure context. Use HTTPS or localhost rather than HTTP.'
-    } else {
-      error.value += err.message
-    }
-  }
-
-  onMounted(()=>{
-    data.value = StaffMemeberDataService.getAll();
-  })
-
-  const data = ref([]); // Empty array to hold data fetched from the backend
-
-  const headers: Header[] = [
-  { text: "Name", value: "name" },
-  { text: "F-Number", value: "fnumber" },
-  { text: "Email", value: "email" },
-  { text: "Status", value: "status", sortable: true },
-];
-
-  // Fetch data from the backend on mount
+// Fetch data from the backend
 const fetchData = async () => {
   try {
-    const response = await StaffMemeberDataService.getAll(); // Replace with your API call
-    data.value = response.data; // Update the list with the backend data
-    loading.value = false;
-    console.log(data.value)
-  } catch (err) {
-    console.error("Error fetching data:", err);
-    error.value = "Failed to load data from the server.";
+    const response = await StaffMemeberDataService.getAll();
+    const staffMembers: StaffMember[] = response.data;
+    data.value = staffMembers;
+    console.log(staffMembers);
+  } catch (error) {
+    console.error("Error fetching staff members:", error);
   }
 };
 
-// Computed property for filtered data
+// Mark a staff member as used
+const markAsUsed = async (fnumber: string): Promise<void> => {
+  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
+
+  if (item) {
+    try {
+      const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
+      if (response.status === 200) {
+        
+        result.value = `${fnumber} matched and marked as used!`;
+        searchTerm.value = '';
+        paused.value = false;
+        fetchData();
+      } else {
+        result.value = `Failed to update the status for ${fnumber}.`;
+      }
+    } catch (err) {
+      result.value = `Error updating the status for ${fnumber}.`;
+    }
+  } else {
+    fetchData();
+    paused.value = false;
+    result.value = `${fnumber} not found or already used.`;
+  }
+};
+
 const filteredData = computed(() =>
   data.value.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
@@ -74,44 +77,29 @@ const filteredData = computed(() =>
   )
 );
 
-// Validate fnumber
-const validateCode = (input: string) => {
-  if (input.trim().toUpperCase().startsWith("ID")) {
-    result.value = `Do not include 'ID' in the code. Enter the rest of the code (e.g., '12345' instead of 'ID12345').`;
-    return false;
-  }
-  return true;
+const onDetect = (detectedResult: string) => {
+  const resultArray = detectedResult.map((code) => code.rawValue); 
+  const resultString = resultArray.join(','); // Join with a comma or any separator you prefer 
+  const jsonString = JSON.stringify(resultString);
+  const plainString = jsonString.replace(/(^"|"$)/g, '');
+  console.log(plainString)
+  paused.value = true;
+  markAsUsed(plainString);  
+  // await timeout(500);
+  
+  
 };
 
-// Helper function to mark code as used
-const markAsUsed = async (fnumber: string) => {
-  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
-
-  if (item) {
-    try {
-      // Call backend to update the status
-      const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
-
-      if (response.status === 200) {
-        // Successfully updated, now refresh the list
-        fetchData();
-        result.value = `${fnumber} matched and marked as used!`;
-      } else {
-        result.value = `Failed to update the status for ${fnumber}.`;
-      }
-    } catch (err) {
-      console.error("Error updating status:", err);
-      result.value = `Error updating the status for ${fnumber}.`;
-    }
-  } else {
-    result.value = `${fnumber} not found or already used.`;
-  }
+const onError = (err: Error & { name?: string }) => {
+  error.value = `[${err.name}]: ${err.message}`;
 };
 
-// Call fetchData on mount
+// Initialize data on mount
 onMounted(() => {
   fetchData();
 });
+
+
   
   // Sample Table Data
 // const data = ref([
@@ -165,15 +153,21 @@ onMounted(() => {
             <p style="color: red">{{ error }}</p>
 
             <div class="d-flex justify-content-between align-items-start">
-      <!-- QR Code Scanner -->
+      
+              <!-- QR Code Scanner -->
       <div class="scanner-container">
         <p>Last result: <b>{{ result }}</b></p>
+        
         <div class="scanner-box">
           <qrcode-stream
-            :track="paintBoundingBox"
+            :paused="paused"
+            @camera-on="onCameraOn"
+            @camera-off="onCameraOff"
             @detect="onDetect"
             @error="onError"
-          ></qrcode-stream>
+          >
+     
+        </qrcode-stream>
         </div>
       </div>
 
@@ -185,35 +179,36 @@ onMounted(() => {
           type="text"
           v-model="searchTerm"
           placeholder="F Number..."
+          @input="onSearch"
           class="form-control"
         />
-
-       
       </div>
     </div>
 
     <!-- Table Below -->
     <div class="table-container mt-4">
-
-        <EasyDataTable
-          :headers="headers"
-          :items="data"
-          :search-value="searchTerm"
-          :loading="loading"
-          buttons-pagination
-          show-index
-
-        >
-
-        <template #loading>
-                        <img
-                          src="https://i.pinimg.com/originals/94/fd/2b/94fd2bf50097ade743220761f41693d5.gif"
-                          style="width: 100px; height: 80px;"
-                        />
-        </template>
-
-        </EasyDataTable>
-      </div>
+      <table class="table table-bordered">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>F-Number</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(item, index) in filteredData" :key="index" :class="{ 'table-used': item.status }">
+            <td>{{ index + 1 }}</td>
+            <td>{{ item.name }}</td>
+            <td>{{ item.fnumber }}</td>
+            <td>
+              <span v-if="item.status " class="text-muted">Verified</span>
+              <span v-else>Not Verified</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   
             
         </div>
@@ -260,4 +255,16 @@ onMounted(() => {
 .text-muted {
   color: gray;
 }
-</style>ba
+
+.scan-confirmation {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+
+  background-color: rgba(255, 255, 255, 0.8);
+
+  display: flex;
+  flex-flow: row nowrap;
+  justify-content: center;
+}
+</style>

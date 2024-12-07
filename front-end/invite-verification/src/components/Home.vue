@@ -1,61 +1,96 @@
-<script setup lang="ts">
+<script setup>
 import Nav from '../src/components/Nav.vue';
 import { ref, computed, onMounted } from 'vue';
-import StaffMemeberDataService from '../src/services/StaffMemeberDataService.js';
+import StaffMemeberDataService from './services/StaffMemeberDataService';
+import Swal from 'sweetalert2';
 
-const result =ref('')
-const error = ref('')
-const searchTerm = ref("");
+const result = ref('');
+const paused = ref(false);
+const showScanConfirmation = ref(false);
 
-const onSearch = () => {
-  markAsUsed(searchTerm.value.trim());
+const error = ref('');
+const searchTerm = ref('');
+const data = ref([]); // Reactive array for staff members
+
+// Fetch data from the backend
+const resetFields = () => {
+  searchTerm.value = ''; // Clear search field
+        paused.value = false;
+        fetchData(); // Refresh the data list
 };
 
-// Event Handlers
-const onDetect = (detectedResult) => {
-  markAsUsed(detectedResult);
-};
-
-  function onError(err) {
-    error.value = `[${err.name}]: `
-
-    if (err.name === 'NotAllowedError') {
-      error.value += 'you need to grant camera access permission'
-    } else if (err.name === 'NotFoundError') {
-      error.value += 'no camera on this device'
-    } else if (err.name === 'NotSupportedError') {
-      error.value += 'secure context required (HTTPS, localhost)'
-    } else if (err.name === 'NotReadableError') {
-      error.value += 'is the camera already in use?'
-    } else if (err.name === 'OverconstrainedError') {
-      error.value += 'installed cameras are not suitable'
-    } else if (err.name === 'StreamApiNotSupportedError') {
-      error.value += 'Stream API is not supported in this browser'
-    } else if (err.name === 'InsecureContextError') {
-      error.value += 'Camera access is only permitted in secure context. Use HTTPS or localhost rather than HTTP.'
-    } else {
-      error.value += err.message
-    }
-  }
-
-  onMounted(()=>{
-    data.value = StaffMemeberDataService.getAll();
-  })
-
-  const data = ref([]); // Empty array to hold data fetched from the backend
-
-  // Fetch data from the backend on mount
+// Fetch data from the backend
 const fetchData = async () => {
   try {
-    const response = await StaffMemeberDataService.getAll(); // Replace with your API call
-    data.value = response.data; // Update the list with the backend data
+    const response = await StaffMemeberDataService.getAll();
+    data.value = response.data; // Update staff data
+    console.log("Fetched staff members:", response.data);
   } catch (err) {
-    console.error("Error fetching data:", err);
-    error.value = "Failed to load data from the server.";
+    console.error("Error fetching staff members:", err);
+    error.value = `Error fetching staff members: ${err.message}`;
   }
 };
 
-// Computed property for filtered data
+// SweetAlert helpers
+const showAlert = (title, text, icon) => {
+  Swal.fire({
+    title,
+    text,
+    icon,
+    timer: 2000, // Alert will close after 2 seconds
+    showConfirmButton: false, // No confirm button
+    toast: true, // Make it look like a notification (optional)
+    position: 'top-right', // Position it at the top-right corner (optional)
+  });
+};
+
+// Mark a staff member as used
+const markAsUsed = async (fnumber) => {
+  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
+  const itemExists = data.value.find((row) => row.fnumber === fnumber);
+console.log(itemExists)
+  if (!itemExists) {
+    // Not found in the list
+    showAlert('Not Found', `The F-Number ${fnumber} was not found in the list.`, 'error');
+    consloe.log(itemExists)
+    resetFields();
+    return;
+  }
+
+  if (itemExists.status) {
+    // Already confirmed
+    showAlert('Already Confirmed', `The F-Number ${fnumber} has already been confirmed.`, 'info');
+    resetFields();
+    consloe.log(item)
+    return;
+  }
+
+  
+    try {
+      const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
+      if (response.status === 200) {
+        // Successfully marked as used
+        showAlert('Confirmed', `The F-Number ${fnumber} has been successfully confirmed!`, 'success');
+        result.value = `${fnumber} matched and marked as used!`;
+        resetFields();
+      } else {
+        
+        result.value = `Failed to update the status for ${fnumber}.`;
+        showAlert('Error', `Failed to update the status for ${fnumber}.`, 'error');
+        resetFields();
+      }
+    } catch (err) {
+      console.error("Error updating status:", err);
+      result.value = `Error updating the status for ${fnumber}.`;
+      showAlert('Error', `An error occurred while updating the status for ${fnumber}.`, 'error');
+      resetFields();
+    }
+  
+};
+
+
+
+// Filter data based on search term
 const filteredData = computed(() =>
   data.value.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
@@ -63,87 +98,43 @@ const filteredData = computed(() =>
   )
 );
 
-// Validate fnumber
-const validateCode = (input: string) => {
-  if (input.trim().toUpperCase().startsWith("ID")) {
-    result.value = `Do not include 'ID' in the code. Enter the rest of the code (e.g., '12345' instead of 'ID12345').`;
-    return false;
-  }
-  return true;
+// Handlers for camera events
+const onCameraOn = () => {
+  showScanConfirmation.value = false;
 };
 
-// Helper function to mark code as used
-const markAsUsed = async (fnumber: string) => {
-  const item = data.value.find((row) => row.fnumber === fnumber && !row.status);
-
-  if (item) {
-    try {
-      // Call backend to update the status
-      const response = await StaffMemeberDataService.updateStatus(item.fnumber, { status: true });
-
-      if (response.status === 200) {
-        // Successfully updated, now refresh the list
-        fetchData();
-        result.value = `${fnumber} matched and marked as used!`;
-      } else {
-        result.value = `Failed to update the status for ${fnumber}.`;
-      }
-    } catch (err) {
-      console.error("Error updating status:", err);
-      result.value = `Error updating the status for ${fnumber}.`;
-    }
-  } else {
-    result.value = `${fnumber} not found or already used.`;
-  }
+const onCameraOff = () => {
+  showScanConfirmation.value = true;
 };
 
-// Call fetchData on mount
+const onError = (err) => {
+  console.error(err);
+  error.value = `[${err.name}]: ${err.message}`;
+};
+
+// Handle detection from the QR scanner
+const onDetect = (detectedCodes) => {
+  const detectedValues = detectedCodes.map((code) => code.rawValue);
+  const detectedString = detectedValues.join(','); // Combine multiple codes if needed
+  console.log("Detected:", detectedString);
+
+  searchTerm.value = detectedString; // Push detected value to the search field
+  paused.value = true; // Pause scanning
+  markAsUsed(detectedString); // Trigger marking process
+};
+
+// Handle manual search
+const onSearch = () => {
+  console.log("Search triggered for:", searchTerm.value.trim());
+  markAsUsed(searchTerm.value.trim());
+};
+
+// Fetch data when the component is mounted
 onMounted(() => {
   fetchData();
 });
-  
-  // Sample Table Data
-// const data = ref([
-//   { name: "Mwamba Changala", details: "Sample Detail 1", code: "5543231", used:false },
-//   { name: "Mweeemba Hambulo", details: "Sample Detail 2", code: "5095808", used:false },
-//   { name: "John Doe", details: "Sample Detail 3", code: "CODE789", used:false },
-// ]);
-
-// // Computed Property for Filtered Data
-// const filteredData = computed(() =>
-
-//   data.value.filter((item) =>
-
-//     item.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-//     item.code.toLowerCase().includes(searchTerm.value.toLowerCase())
-
-//   )
-
-
-// );
-
-// const validateCode = (input) => {
-//   // Check if input starts with 'ID'
-//   if (input.trim().toUpperCase().startsWith("ID")) {
-//     result.value = `Do not include 'ID' in the code. Enter the rest of the code (e.g., '12345' instead of 'ID12345').`;
-//     return false;
-//   }
-// }
-// // Helper Function to Mark Code as Used
-// const markAsUsed = (code) => {
-//   const item = data.value.find((row) => row.code === code && !row.used);
-//        console.log(item)
-//   if (item) {
-//     item.used = true; // Mark the row as used
-//     result.value = `${code} matched and marked as used!`;
-//   } else {
-//     result.value = `${code} not found or already used.`;
-//   }
-
-  
-// };
-
 </script>
+
 
 <template>
  
@@ -154,15 +145,21 @@ onMounted(() => {
             <p style="color: red">{{ error }}</p>
 
             <div class="d-flex justify-content-between align-items-start">
-      <!-- QR Code Scanner -->
+      
+              <!-- QR Code Scanner -->
       <div class="scanner-container">
         <p>Last result: <b>{{ result }}</b></p>
+        
         <div class="scanner-box">
           <qrcode-stream
-            :track="paintBoundingBox"
+            :paused="paused"
+            @camera-on="onCameraOn"
+            @camera-off="onCameraOff"
             @detect="onDetect"
             @error="onError"
-          ></qrcode-stream>
+          >
+     
+        </qrcode-stream>
         </div>
       </div>
 
@@ -192,7 +189,7 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(item, index) in filteredData" :key="index" :class="{ 'table-used': item.used }">
+          <tr v-for="(item, index) in filteredData" :key="index" :class="{ 'table-used': item.status }">
             <td>{{ index + 1 }}</td>
             <td>{{ item.name }}</td>
             <td>{{ item.fnumber }}</td>
@@ -250,4 +247,16 @@ onMounted(() => {
 .text-muted {
   color: gray;
 }
-</style>ba
+
+.scan-confirmation {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+
+  background-color: rgba(255, 255, 255, 0.8);
+
+  display: flex;
+  flex-flow: row nowrap;
+  justify-content: center;
+}
+</style>
